@@ -72,6 +72,50 @@ class RESTStackProvisioner {
         }
     }
 
+    public static JSONObject getSlaveStatus(RESTStackSlaveTemplate template, String machineName) throws PermissionDeniedException, IOException, Descriptor.FormException {
+        String provisionerUrl = template.getCloud().getProvisionerUrl();
+        String authToken = template.getCloud().getAuthToken();
+
+        CloseableHttpClient client = HttpClients.createDefault();
+
+        try {
+            HttpGet req = new HttpGet(provisionerUrl + PROVISION_PATH + "/" + machineName);
+            req.addHeader("X-Auth-Token", authToken);
+            req.addHeader("Accept", "application/json");
+
+            CloseableHttpResponse response = client.execute(req);
+            try {
+                StatusLine statusLine = response.getStatusLine();
+                if (statusLine.getStatusCode() == 200) {
+                    HttpEntity entity = response.getEntity();
+                    if (entity != null) {
+                        BufferedReader br = new BufferedReader(new InputStreamReader(entity.getContent()));
+                        StringBuffer sb = new StringBuffer();
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            sb.append(line);
+                        }
+
+                        JSONObject obj = JSONObject.fromObject(sb.toString());
+                        LOGGER.info("Provision status of machine " + machineName + ": " + obj.getString("status"));
+                        if (obj.getString("status").equals("READY"))
+                            return obj;
+                    }
+
+                    return null;
+                } else if (statusLine.getStatusCode() == 401) {
+                    throw new PermissionDeniedException("Access denied");
+                } else {
+                    throw new IOException("Unexpected status from provisioner: " + statusLine.getStatusCode());
+                }
+            } finally {
+                response.close();
+            }
+        } finally {
+            client.close();
+        }
+    }
+
     public static RESTStackSlave provisionSlave(RESTStackSlaveTemplate template, String machineName) throws IOException, Descriptor.FormException {
         String provisionerUrl = template.getCloud().getProvisionerUrl();
         String authToken = template.getCloud().getAuthToken();
@@ -118,10 +162,25 @@ class RESTStackProvisioner {
                     }
                 } else if (statusLine.getStatusCode() == 202) {
                     // Results available at a later time (deferred)
-                    // XXX: implement me; repeatedly call 'GET' until we
-                    //      get a '200' response, and the status of the
-                    //      object is as expected.
-                    throw new AssertionError("Not implemented yet");
+                    // repeatedly call 'GET' until we get a '200' response,
+                    // and the status of the object is as expected.
+                    JSONObject obj;
+
+                    while ((obj = getSlaveStatus(template, machineName)) == null) {
+                        try {
+                            Thread.sleep(5000);
+                        } catch (InterruptedException e) { }
+                    }
+
+                    return new RESTStackSlave(template.getCloud().name, machineName,
+                            obj.getString("ip"),
+                            obj.optInt("ssh_port", 22), template.getDescription(),
+                            template.getFsRoot(), template.getJvmOptions(),
+                            template.getCredentialsId(), 1, template.getMode(),
+                            template.getLabelString(),
+                            template.getRetentionStrategy(),
+                            Collections.<NodeProperty<?>>emptyList());
+
                 } else {
                     throw new IOException("Unexpected status from provisioner: " + statusLine.getStatusCode());
                 }
