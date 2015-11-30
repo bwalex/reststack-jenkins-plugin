@@ -135,10 +135,10 @@ class RESTStackProvisioner {
     }
 
     public static RESTStackSlave provisionSlave(RESTStackSlaveTemplate template) throws IOException, Descriptor.FormException {
-        // XXX: rethink whether UUIDs or incrementing integers are better...
-        //String randomId = UUID.randomUUID().toString();
-        //String tenantId = template.getName() + "_" + randomId;
-        String tenantId = template.getName() + "_" + getNextSeqNo();
+        // XXX: UUIDs to be used for the time being to avoid problems when Jenkins restarts
+        String randomId = UUID.randomUUID().toString();
+        String tenantId = template.getName() + "_" + randomId;
+        //String tenantId = template.getName() + "_" + getNextSeqNo();
         return provisionSlave(template, tenantId);
     }
 
