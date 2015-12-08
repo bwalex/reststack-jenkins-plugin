@@ -21,6 +21,8 @@ import hudson.slaves.ComputerLauncher;
 import hudson.slaves.RetentionStrategy;
 import hudson.util.StreamTaskListener;
 
+import jenkins.model.Jenkins;
+
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
@@ -52,9 +54,13 @@ public class RESTStackCloud extends Cloud {
     private final List<RESTStackSlaveTemplate> templates;
     private final String provisionerUrl;
     private final String authToken;
+    private final int maxSlaves;
+
+    protected transient int plannedNodes;
 
     @DataBoundConstructor
     public RESTStackCloud(String name, String provisionerUrl, String authToken,
+                          int maxSlaves,
 		         final List<RESTStackSlaveTemplate> templates) {
         super(name);
         if (templates != null)
@@ -64,6 +70,8 @@ public class RESTStackCloud extends Cloud {
 
         this.provisionerUrl = Util.fixEmptyAndTrim(provisionerUrl);
         this.authToken = Util.fixEmptyAndTrim(authToken);
+        this.maxSlaves = maxSlaves;
+        this.plannedNodes = 0;
 
         readResolve();
     }
@@ -80,6 +88,10 @@ public class RESTStackCloud extends Cloud {
         return authToken;
     }
 
+    public int getMaxSlaves() {
+        return maxSlaves;
+    }
+
     public RESTStackSlaveTemplate getTemplate(Label label) {
         for (RESTStackSlaveTemplate t : templates)
             if (label == null || label.matches(t.getLabelSet()))
@@ -87,19 +99,46 @@ public class RESTStackCloud extends Cloud {
         return null;
     }
 
+
+    public synchronized void incPlannedNodes() {
+        ++this.plannedNodes;
+    }
+
+    public synchronized void decPlannedNodes() {
+        --this.plannedNodes;
+    }
+
     public synchronized Collection<PlannedNode> provision(Label label, int excessWorkloads) {
         final RESTStackSlaveTemplate slaveTemplate = getTemplate(label);
         List<PlannedNode> nodes = new ArrayList<PlannedNode>();
+        int activeSlaves = 0;
 
-        while (excessWorkloads > 0) {
+        for (final Node n : Jenkins.getActiveInstance().getNodes()) {
+            if (!(n instanceof RESTStackSlave))
+                continue;
+
+            final RESTStackSlave node = (RESTStackSlave) n;
+
+            if (node != null && !node.isPendingDelete())
+                ++activeSlaves;
+        }
+
+        activeSlaves += this.plannedNodes;
+
+        while ((excessWorkloads > 0) &&
+                ((getMaxSlaves() == 0) || (activeSlaves < getMaxSlaves()))) {
+            incPlannedNodes();
+
             nodes.add(new PlannedNode(slaveTemplate.getName(),
                 Computer.threadPoolForRemoting.submit(new Callable<Node>() {
                     public Node call() throws Exception {
                         RESTStackSlave slave = slaveTemplate.provisionSlave();
+                        decPlannedNodes();
                         return slave;
                     }
             }), 1));
 
+            ++activeSlaves;
             excessWorkloads -= 1;
         }
         return nodes;
@@ -131,6 +170,18 @@ public class RESTStackCloud extends Cloud {
                 return FormValidation.error("Permission Denied: " + e.getMessage());
             } catch (IOException e) {
                 return FormValidation.error("IO error: " + e.getMessage());
+            }
+        }
+
+        public FormValidation doCheckMaxSlaves(@QueryParameter String value) {
+            try {
+                Integer maxSlaves = Integer.parseInt(value);
+                if (maxSlaves < 0)
+                    return FormValidation.error("Must not be negative");
+                else
+                    return FormValidation.ok();
+            } catch (NumberFormatException  e) {
+                return FormValidation.error("Not a number");
             }
         }
     }
