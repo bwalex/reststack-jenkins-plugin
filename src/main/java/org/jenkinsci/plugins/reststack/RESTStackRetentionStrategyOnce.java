@@ -104,9 +104,10 @@ public class RESTStackRetentionStrategyOnce extends RetentionStrategy<RESTStackC
 
         LOGGER.info("Marking computer " + c.getName() + " offline, as it is due for removal");
         c.setTemporarilyOffline(true, OfflineCause.create(Messages._DeletedCause()));
-        if (node != null)
+        if (node != null) {
             LOGGER.info("Marking node " + c.getName() + " for deletion");
             node.setPendingDelete(true);
+	}
 
         //Queue.withLock();
         //Computer.threadPoolForRemoting.submit(new Runnable() {
