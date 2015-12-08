@@ -55,6 +55,7 @@ public class RESTStackRetentionStrategyOnce extends RetentionStrategy<RESTStackC
         if (computer.isIdle()) {
             final long idleMilliseconds = System.currentTimeMillis() - computer.getIdleStartMilliseconds();
             if (idleMilliseconds > TimeUnit2.MINUTES.toMillis(idleTerminationMinutes)) {
+                LOGGER.info("Idle termination threshold exceeded on " + computer.getName() + ", terminating");
                 terminateComputer(computer);
             }
         }
@@ -63,25 +64,31 @@ public class RESTStackRetentionStrategyOnce extends RetentionStrategy<RESTStackC
 
     @Override
     public void taskAccepted(Executor executor, Queue.Task task) {
+        final RESTStackComputer c = (RESTStackComputer) executor.getOwner();
+        LOGGER.info("taskAccepted on " + c.getName());
     }
 
     @Override
     public void taskCompleted(Executor executor, Queue.Task task, long durationMs) {
+        final RESTStackComputer c = (RESTStackComputer) executor.getOwner();
+        LOGGER.info("taskCompleted on " + c.getName() + ", terminating");
         tryTerminateExecutor(executor);
     }
 
     @Override
     public void taskCompletedWithProblems(Executor executor, Queue.Task task, long durationMs, Throwable problems) {
+        final RESTStackComputer c = (RESTStackComputer) executor.getOwner();
+        LOGGER.info("taskCompletedWithProblems on " + c.getName() + ", terminating");
         tryTerminateExecutor(executor);
     }
 
     @Override
-    public boolean isAcceptingTasks(final RESTStackComputer computer) {
+    public synchronized boolean isAcceptingTasks(final RESTStackComputer computer) {
         final RESTStackSlave node = computer.getNode();
-        return (node != null && !node.isPendingDelete());
+        return (node != null && !node.isPendingDelete() && computer.isOnline());
     }
 
-    private void tryTerminateExecutor(final Executor executor) {
+    private synchronized void tryTerminateExecutor(final Executor executor) {
         final RESTStackComputer c = (RESTStackComputer) executor.getOwner();
         Queue.Executable executable = executor.getCurrentExecutable();
         //if ((executable instanceof ContinuableExecutable) && ((ContinuableExecutable) executable).willContinue()) {
@@ -92,7 +99,7 @@ public class RESTStackRetentionStrategyOnce extends RetentionStrategy<RESTStackC
         terminateComputer(c);
     }
 
-    private void terminateComputer(final AbstractCloudComputer<RESTStackSlave> c) {
+    private synchronized void terminateComputer(final AbstractCloudComputer<RESTStackSlave> c) {
         final RESTStackSlave node = c.getNode();
 
         LOGGER.info("Marking computer " + c.getName() + " offline, as it is due for removal");
