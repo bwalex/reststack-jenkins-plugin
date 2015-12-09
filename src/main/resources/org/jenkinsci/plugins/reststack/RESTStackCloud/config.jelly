@@ -10,7 +10,7 @@
         <f:textbox/>
     </f:entry>
     <f:entry title="Max Concurrent Slaves" field="maxSlaves">
-    	<f:textbox/>
+        <f:textbox/>
     </f:entry>
     <f:validateButton title="${%Test Connection}" progress="${%Testing...}" method="testConnection" with="provisionerUrl,authToken" />
     <f:entry title="Cloud Instance Templates" description="${%List of Cloud Instances to be launched as slaves}">
